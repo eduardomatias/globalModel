@@ -70,10 +70,12 @@ class Model {
 	*
 	* @author Eduardo Matias 
 	* @param $where string clausula where do sql
+	* @param $order string campos order by do sql
+	* @param $limit string quantidade de linhas de retorno do sql
 	* @return string
 	*/
-    public function find($where = "") {
-        $sql = "SELECT * FROM " . $this::tableSchema() . "." . $this::tableName() . (!$where ? "" : " WHERE " . $where);
+    public function find($where = "", $order = null, $limit = null) {
+        $sql = "SELECT * FROM " . $this::tableSchema() . "." . $this::tableName() . (!$where ? "" : " WHERE " . $where) . (!$order ? "" : " ORDER BY " . $order) . (!$limit ? "" : " LIMIT 0," . (int) $limit);
         return $this->db->queryAssoc($sql);
 	}
 	
