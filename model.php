@@ -143,6 +143,8 @@ class Model {
 					// throw new Exception($exec);
 					throw new Exception('PDO: Erro inesperado, tente novamente.');
 				}
+				// add id inserido/alterado
+				$this->setAttributes(array($pkName => $this->lastId));
 				$return = array('status' => true, 'return' => array_merge($this->attributes, $this->attributesSet));
 				// clear attributes
 				$this->attributesModel();
@@ -179,8 +181,10 @@ class Model {
 				if (!@$query->execute()) {
 					throw new Exception($query->errorInfo());
 				}
+				$this->lastId = $this->db->lastInsertId();
+			} else {
+				$this->lastId = null;				
 			}
-			$this->lastId = $query->lastInsertId();
 			$return = true;
 		} catch (Exception $ex) {
 			$return = $ex->getMessage();
@@ -220,7 +224,6 @@ class Model {
 		}
 		return $return;
 	}
-	
 	
 	/**
 	* formatAttrSqlBind
