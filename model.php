@@ -132,7 +132,7 @@ class Model {
 			$pkName = $this::primaryKey();
 			
 			// acao
-			$action = (array_key_exists($pkName, $this->attributesSet)) ? 'update' : 'insert';
+			$action = !empty($this->attributesSet[$pkName]) ? 'update' : 'insert';
 			
 			// valida atributos do modelo
 			$valido = ($validate) ? $this->validate($action) : true;
