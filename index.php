@@ -37,7 +37,7 @@
 		* @return string
 		*/
 		public static function primaryKey() {
-			return 'TBL01_ID';
+			return array('TBL01_ID');
 		}
 		
 		/**
@@ -123,7 +123,7 @@
 	$arrayAttr = array(
 		'TBL01_ID' => '6',
 		'TBL01_NOME' => 'New Empresa 6',
-		'TBL01_CNPJ' => '12312332132145',
+		'TBL01_CNPJ' => '92312332138195',
 		'TBL01_SENHA' => 'SENHA_VALIDA_32_CARACTERES______',
 		'TBL01_ATIVO' => '1'
 	);
@@ -140,6 +140,7 @@
 		var_dump($empresa_1);
 		
 		$arrayAttr['TBL01_SENHA'] = 'SENHA_GRANDE_40_CARACTERES______________';
+		$arrayAttr['TBL01_SENHA'] = 'SENHA_VALIDA_32_CARACTERES______';
 		$empresa_1->setAttributes($arrayAttr);
 		
 		echo '<br /><br />GETATTRIBUTESSET';

@@ -107,21 +107,35 @@ class Model {
      * realiza busca de um registro (id) na tabela do modelo
      *
      * @author Eduardo Matias 
-     * @param $id string clausula where do sql
+     * @param $pk array[key - nome do attr, value - valor a ser comparado] clausula where do sql
      * @return instance
      */
-    public function findOne($id) {
-        $pkName = strtoupper($this::primaryKey());
-        $pkValue = $id;
-        $sql = "SELECT * FROM " . $this::tableSchema() . "." . $this::tableName() . " WHERE " . $pkName . '=?';
-        $r = $this->db->queryAssoc($sql, array($pkValue));
+    public function findOne($pkParam) {
+		$pkTable = $this::primaryKey();
+		if(!is_array($pkParam)) {
+			$pkParam = array($pkTable[0] => $pkParam);
+			//exit('findOne($param): informe uma array - ["key - nome da pk" => "value - valor a ser comparado"] ');
+		}
+		$pkSQL = $pkValue = $attributesSet = array();
+		foreach($pkParam as $k => $p){
+			$k = strtoupper($k);
+			if(!in_array($k, $pkTable)){
+				exit('findOne($param): o attr informado nao é PK do modelo (' . $k . ')');
+			}
+			$pkSQL[] = $k . "=?";
+			$pkValue[] = $p;
+			$attributesSet[$k] = $p; 
+		}
+        $pkName = implode(' AND ', $pkSQL);
+        $sql = "SELECT * FROM " . $this::tableSchema() . "." . $this::tableName() . " WHERE " . $pkName;
+        $r = $this->db->queryAssoc($sql, $pkValue);
         $newInstance = null;
         if (array_key_exists(0, $r)) {
             $class = get_class($this);
             $newInstance = new $class($this->db);
             $newInstance->setAttributes($r[0]);
             $newInstance->attributesOld = $r[0];
-            $newInstance->attributesSet = array();
+            $newInstance->attributesSet = $attributesSet;
         }
         return $newInstance;
     }
@@ -152,21 +166,33 @@ class Model {
 
             $pkName = $this::primaryKey();
 
-            // acao
-            $action = !empty($this->attributesSet[$pkName]) ? 'update' : 'insert';
-
+            // acao			
+			$pkTable = $this::primaryKey();
+			$action = 'update';
+			$camposPkUpdate = array();
+			foreach ($pkTable as $pk) {
+				$pk = strtoupper($pk);
+				if (empty($this->attributesSet[$pk])) {					
+					$action = 'insert';
+					break;
+				}
+				$camposPkUpdate[$pk] = $this->attributesSet[$pk];
+			}
+			
             // valida atributos do modelo
             $valido = ($validate) ? $this->validate($action) : true;
             if ($valido !== true) {
                 $return = array('status' => false, 'return' => $valido);
+				
             } else {
-                $exec = (($action == 'update')) ? $this->$action($this->attributesSet[$pkName]) : $this->$action();
+				
+                $exec = (($action == 'update')) ? $this->$action($camposPkUpdate) : $this->$action();
                 if ($exec !== true) {
                     // throw new Exception($exec);
                     throw new Exception('PDO: Erro inesperado, tente novamente.');
                 }
                 // add id inserido/alterado
-                $this->setAttributes(array($pkName => $this->lastId));
+                $this->setAttributes((is_array($this->lastId) ? $this->lastId : array($pkName[0] => $this->lastId)));
                 $return = array('status' => true, 'return' => array_merge($this->attributes, $this->attributesSet));
                 // clear attributes
                 $this->attributesModel();
@@ -187,10 +213,12 @@ class Model {
     public function insert() {
         try {
             if ($this->attributesSet) {
-                $pkName = $this::primaryKey();
-                if (array_key_exists($pkName, $this->attributesSet)) {
-                    unset($this->attributesSet[$pkName]);
-                }
+                $pkTable = $this::primaryKey();
+				foreach ($pkTable as $pkName) {					
+					if (array_key_exists($pkName, $this->attributesSet)) {
+						unset($this->attributesSet[$pkName]);
+					}
+				}
                 $colunas = array_keys($this->attributesSet);
                 $valores = array_values($this->attributesSet);
                 $colunasInsert = array();
@@ -227,13 +255,17 @@ class Model {
     public function update($pk) {
         try {
             if ($this->attributesSet) {
+				$pkWhere = array();
+				foreach ($pk as $k => $p) {
+					$pkWhere[] = $k . " = '" . $p . "'";
+				}
                 $colunas = array_keys($this->attributesSet);
                 $valores = array_values($this->attributesSet);
                 $colunasUpdate = array();
                 foreach ($colunas as $c) {
                     $colunasUpdate[] = $c . "=" . $this->formatAttrSqlBind($c);
                 }
-                $SQL = "UPDATE " . $this::tableSchema() . "." . $this::tableName() . " SET " . implode(',', $colunasUpdate) . " WHERE " . $this::primaryKey() . "=" . $pk;
+                $SQL = "UPDATE " . $this::tableSchema() . "." . $this::tableName() . " SET " . implode(',', $colunasUpdate) . " WHERE " . implode(' AND ', $pkWhere);
                 $query = $this->db->prepare($SQL);
                 foreach ($colunas as $k => $c) {
                     $query->bindParam(":" . $c, $valores[$k], PDO::PARAM_STR, strlen($valores[$k]));
@@ -425,9 +457,10 @@ class Model {
 		}
 		
 		// validate - is not null (para insert olha todos os attrs, para update verifica apenas os attr alterados)
-		$attributesValidateNull = ($action == 'insert') ? $this->attributes : $this->attributesSet;			
+		$attributesValidateNull = ($action == 'insert') ? $this->attributes : $this->attributesSet;
+		$primaryKey = $this::primaryKey();
 		foreach ($attributesValidateNull as $k => $v) {				
-			if (!$this->attributesNull[$k] && empty($v)) {
+			if (!$this->attributesNull[$k] && empty($v) && !in_array($k, $primaryKey)) {
 				$erroStr = 'O campo "' . $attributeLabel[$k] . '" é obrigatório.';
 				$e[] = array($k => $erroStr);
 			}
