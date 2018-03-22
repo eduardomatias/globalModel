@@ -33,6 +33,14 @@ class Model {
      * @author Eduardo Matias 
      */
     private $attributes = array();
+	
+    /**
+     * attributesOld
+     * atributos da classe de modelo - valor original (findOne)
+     *
+     * @author Eduardo Matias 
+     */
+    private $attributesOld = array();
 
     /**
      * attributesSet
@@ -50,6 +58,23 @@ class Model {
      */
     private $attributesType = array();
 
+    /**
+     * attributesLength
+     * quantidade de caracteres dos atributos no banco de dados
+     *
+     * @author Eduardo Matias 
+     */
+	var $attributesLength = array();
+	
+    /**
+     * attributesNull
+     * permite null nos atributos no banco de dados
+     *
+     * @author Eduardo Matias 
+     */
+    var $attributesNull = array();
+	
+	
     public function __construct($db) {
 
         date_default_timezone_set('America/Sao_Paulo');
@@ -95,7 +120,8 @@ class Model {
             $class = get_class($this);
             $newInstance = new $class($this->db);
             $newInstance->setAttributes($r[0]);
-            $newInstance->attributesSet = array($pkName => $pkValue);
+            $newInstance->attributesOld = $r[0];
+            $newInstance->attributesSet = array();
         }
         return $newInstance;
     }
@@ -177,7 +203,8 @@ class Model {
                     $query->bindParam(":" . $c, $valores[$k], PDO::PARAM_STR, strlen($valores[$k]));
                 }
                 if (!@$query->execute()) {
-                    throw new Exception($query->errorInfo()[2]);
+					$e = $query->errorInfo();
+                    throw new Exception($e[2]);
                 }
                 $this->lastId = $this->db->lastInsertId();
             } else {
@@ -212,7 +239,8 @@ class Model {
                     $query->bindParam(":" . $c, $valores[$k], PDO::PARAM_STR, strlen($valores[$k]));
                 }
                 if (!@$query->execute()) {
-                    throw new Exception($query->errorInfo()[2]);
+					$e = $query->errorInfo();
+                    throw new Exception($e[2]);
                 }
             }
             $this->lastId = $pk;
@@ -235,7 +263,7 @@ class Model {
             case 'TIMESTAMP(6)':
                 $a = "TO_TIMESTAMP(:" . $attr . ",'DD/MM/YYYY HH24:MI')";
                 break;
-            case 'date':
+            case 'DATE':
                 $a = "STR_TO_DATE(:" . $attr . ",'%d/%m/%Y')";
                 break;
             default:
@@ -253,13 +281,15 @@ class Model {
      * @return void
      */
     public function attributesModel() {
-        $sql = "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '" . $this::tableName() . "' AND TABLE_SCHEMA = '" . $this::tableSchema() . "'";
+        $sql = "SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '" . $this::tableName() . "' AND TABLE_SCHEMA = '" . $this::tableSchema() . "'";
         $colunas = $this->db->queryAssoc($sql);
         foreach ($colunas as $v) {
             $c = strtoupper($v['COLUMN_NAME']);
             $this->{$c} = '';
             $this->attributes[$c] = '';
-            $this->attributesType[$c] = $v['DATA_TYPE'];
+            $this->attributesType[$c] = strtoupper($v['DATA_TYPE']);
+            $this->attributesLength[$c] = ($v['CHARACTER_MAXIMUM_LENGTH']) ? : $v['NUMERIC_PRECISION'];
+            $this->attributesNull[$c] = ($v['IS_NULLABLE'] != 'NO');
         }
         $this->attributesSet = array();
     }
@@ -273,6 +303,17 @@ class Model {
      */
     public function getAttributes() {
         return $this->attributes;
+    }
+
+    /**
+     * getAttributesOld
+     * Obtem os atributos com os valores "originais" (findOne) da classe de modelo
+     *
+     * @author Eduardo Matias 
+     * @return array
+     */
+    public function getAttributesOld() {
+        return $this->attributesOld;
     }
 
     /**
@@ -363,65 +404,152 @@ class Model {
      * Valida atributos setados no modelo
      *
      * @author Eduardo Matias 
+     * @param $action string "update" or "insert"
      * @return bool/array error
      */
     public function validate($action) {
 
-        $validate = new Validate($this->attributeLabel(), $this->attributesSet, $action);
+        $validate = new Validate($this->attributeLabel(), $this->attributesSet, $this->attributesNull, $action);
+		$attributeLabel = $this->attributeLabel();
+		$e = array();
         $error = array();
-        $errorHtml = '';
         $errorAttr = array();
-
+        $errorHtml = '';
+		
+		// type and size test of attribute 
+		$validateTypeSize = $this->validateTypeSize();
+		if($validateTypeSize !== true) {
+			$error 		= $validateTypeSize['error'];
+			$errorAttr 	= $validateTypeSize['attributes'];
+			$errorHtml 	= $validateTypeSize['errorHtml'];
+		}
+		
+		// validate - is not null (para insert olha todos os attrs, para update verifica apenas os attr alterados)
+		$attributesValidateNull = ($action == 'insert') ? $this->attributes : $this->attributesSet;			
+		foreach ($attributesValidateNull as $k => $v) {				
+			if (!$this->attributesNull[$k] && empty($v)) {
+				$erroStr = 'O campo "' . $attributeLabel[$k] . '" é obrigatório.';
+				$e[] = array($k => $erroStr);
+			}
+		}
+		
+		// validate rules
         foreach ($this->rules() as $r) {
             $fn = $r[0];
             $attr = $r[1];
 
-            // verifica se o velidate existe
+            // test - velidate exist
             if (!method_exists($validate, $fn)) {
                 continue;
             }
-
-            if (is_array($attr)) {
-                foreach ($attr as $a) {
-                    $v = $validate->$fn($a, $r);
-                    if ($v !== true) {
-                        $error[] = array($a => $v);
-                        $errorAttr[$a] = $a;
-                        $errorHtml .= "&bull;  " . $v . "<br />";
-                    }
-                }
-            } else {
-                $v = $validate->$fn($attr, $r);
-                if ($v !== true) {
-                    $error[] = array($attr => $v);
-                    $errorAttr[$attr] = $attr;
-                    $errorHtml .= "&bull;  " . $v . "<br />";
-                }
-            }
+			
+			// test - attr array
+            if (!is_array($attr)) {
+				$attr = array($attr);
+			}
+			
+			// loop nos attr para validar
+			foreach ($attr as $a) {
+				$v = $validate->$fn($a, $r);
+				if ($v !== true) {
+					$e[] = array($a => $v);
+				}
+			}
         }
-
-        // formata erro se existir
-        if ($error) {
-            $return = array('error' => $error, 'errorHtml' => $errorHtml, 'attributes' => array_values($errorAttr));
-        } else {
-            $return = true;
-        }
-
+		
+		// formata erros se existir
+		if (!empty($e)) {
+			foreach ($e as $v) {
+				$attr = array_keys($v);
+				$attr = $attr[0];
+				$error[] 		= $v;
+				$errorAttr[]	= $attr;
+				$errorHtml		.= "&bull;  " . $v[$attr] . "<br />";
+			}
+		}
+		
+		if (!empty($error)) {
+            $return = array('error' => $error, 'attributes' => $errorAttr, 'errorHtml' => $errorHtml);
+		} else {			
+			$return = true;
+		}
+		
         return $return;
     }
 
+	/**
+	* validateTypeSize
+	* Valida o tipo e o tamanho dos atributos setados no modelo
+	*
+	* @author Eduardo Matias 
+	* @return bool/array error
+	*/
+	private function validateTypeSize() {
+		
+		$attributesSet = $this->attributesSet;
+		$attributeLabel = $this->attributeLabel();
+		$attributesType = $this->attributesType;
+		$attributesLength = $this->attributesLength;
+		$error = array();
+		$errorAttr = array();
+		$errorHtml = '';
+		
+		foreach ($attributesSet as $k => $v) {
+			$e = array();
+			$attributesTypeK = $attributesType[$k];
+			$attributesLengthK = $attributesLength[$k];
+			
+			// type and size
+			switch ($attributesTypeK) {
+				case 'NUMBER':
+				case 'INT':
+					if (!is_numeric($v)) {
+						$e[] = 'O campo "' . $attributeLabel[$k] . '" não é um numero.';
+					}
+					if (strlen($v) > $attributesLengthK) {
+						$e[] = 'O campo "' . $attributeLabel[$k] . '" não pode ter mais que ' . $attributesLengthK . ' dígito(s).';
+					}
+					break; 
+				case 'VARCHAR2':
+				case 'VARCHAR':
+					if (strlen($v) > $attributesLengthK) {
+						$e[] = 'O campo "' . $attributeLabel[$k] . '" não pode ter mais que ' . $attributesLengthK . ' caractere(s).';
+					}
+					break; 
+			}
+			
+			if (!empty($e)) {
+				foreach ($e as $kk => $vv) {
+					$error[] = array($k => $vv);
+					$errorAttr[] = $k;
+					$errorHtml .= "&bull;  " . $vv . "<br />";
+				}
+			}
+		}
+		
+		if(!empty($error)) {
+            $return = array('error' => $error, 'attributes' => $errorAttr, 'errorHtml' => $errorHtml);
+		} else {
+			$return = true;
+		}
+		
+		return $return;
+	}
+	
 }
 
 class Validate {
 
     public $attributeLabel;
     public $attributes;
+    public $attributesNull;
     // update/insert
     public $action;
 
-    public function __construct($attributeLabel, $attributes, $action) {
+    public function __construct($attributeLabel, $attributes, $attributesNull, $action) {
         $this->attributeLabel = $attributeLabel;
         $this->attributes = $attributes;
+        $this->attributesNull = $attributesNull;
         $this->action = $action;
     }
 
@@ -433,7 +561,7 @@ class Validate {
     }
 
     public function required($attr, $options) {
-        if ((array_key_exists($attr, $this->attributes) && $this->attributes[$attr] != '') || ($this->action == 'update' && !array_key_exists($attr, $this->attributes))) {
+		if (!($this->attributesNull[$attr]) || (array_key_exists($attr, $this->attributes) && $this->attributes[$attr] != '') || ($this->action == 'update' && !array_key_exists($attr, $this->attributes))) {
             $return = true;
         } else {
             $return = $this->message('O campo "{attribute}" é obrigatório.', $attr, $options);
