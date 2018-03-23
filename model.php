@@ -52,7 +52,7 @@ class Model {
 
     /**
      * attributesType
-     * tipo dos atributos no banco de dados
+     * tipo dos atributos
      *
      * @author Eduardo Matias 
      */
@@ -60,19 +60,27 @@ class Model {
 
     /**
      * attributesLength
-     * quantidade de caracteres dos atributos no banco de dados
+     * quantidade de caracteres dos atributos
      *
      * @author Eduardo Matias 
      */
-	var $attributesLength = array();
+	private $attributesLength = array();
 	
     /**
      * attributesNull
-     * permite null nos atributos no banco de dados
+     * permite null nos atributos
      *
      * @author Eduardo Matias 
      */
-    var $attributesNull = array();
+    private $attributesNull = array();
+	
+    /**
+     * attributesUnique
+     * atributos unique
+     *
+     * @author Eduardo Matias 
+     */
+    private $attributesUnique = array();
 	
 	
     public function __construct($db) {
@@ -313,15 +321,18 @@ class Model {
      * @return void
      */
     public function attributesModel() {
-        $sql = "SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '" . $this::tableName() . "' AND TABLE_SCHEMA = '" . $this::tableSchema() . "'";
+        $sql = "SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, IS_NULLABLE, COLUMN_KEY FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '" . $this::tableName() . "' AND TABLE_SCHEMA = '" . $this::tableSchema() . "'";
         $colunas = $this->db->queryAssoc($sql);
-        foreach ($colunas as $v) {
+		foreach ($colunas as $v) {
             $c = strtoupper($v['COLUMN_NAME']);
             $this->{$c} = '';
             $this->attributes[$c] = '';
             $this->attributesType[$c] = strtoupper($v['DATA_TYPE']);
             $this->attributesLength[$c] = ($v['CHARACTER_MAXIMUM_LENGTH']) ? : $v['NUMERIC_PRECISION'];
             $this->attributesNull[$c] = ($v['IS_NULLABLE'] != 'NO');
+            if ($v['COLUMN_KEY'] == 'UNI') {
+				$this->attributesUnique[] = $c;
+			}
         }
         $this->attributesSet = array();
     }
@@ -430,7 +441,28 @@ class Model {
     public function rules() {
         return array();
     }
-
+	
+    /**
+     * msgErrorValidate
+     * Valida atributos setados no modelo
+     *
+     * @author Eduardo Matias 
+     * @param $action string "update" or "insert"
+     * @return bool/array error
+     */
+    private function msgErrorValidate($tipo, $attr = null, $value = null) {
+		$attributeLabel = $this->attributeLabel();
+		$attr = isset($attributeLabel[$attr]) ? $attributeLabel[$attr] : $attr;
+		$msg = array(
+			'NULL' 		 => 'O campo "' . $attr . '" é obrigatório.',
+			'NUMBER' 	 => 'O campo "' . $attr . '" não é um numero.',
+			'LENGTH_DIG' => 'O campo "' . $attr . '" não pode ter mais que ' . $value . ' dígito(s).',
+			'LENGTH_STR' => 'O campo "' . $attr . '" não pode ter mais que ' . $value . ' caractere(s).',
+			'UNIQUE' 	 => 'O campo "' . $attr . '" (' . $value . ') já foi cadastrado na base de dados.'
+		);
+		return $msg[$tipo];
+	}
+	
     /**
      * validate
      * Valida atributos setados no modelo
@@ -440,14 +472,12 @@ class Model {
      * @return bool/array error
      */
     public function validate($action) {
-
         $validate = new Validate($this->attributeLabel(), $this->attributesSet, $this->attributesNull, $action);
-		$attributeLabel = $this->attributeLabel();
+		$primaryKey = $this::primaryKey();
 		$e = array();
         $error = array();
         $errorAttr = array();
         $errorHtml = '';
-		
 		// type and size test of attribute 
 		$validateTypeSize = $this->validateTypeSize();
 		if($validateTypeSize !== true) {
@@ -455,32 +485,47 @@ class Model {
 			$errorAttr 	= $validateTypeSize['attributes'];
 			$errorHtml 	= $validateTypeSize['errorHtml'];
 		}
-		
 		// validate - is not null (para insert olha todos os attrs, para update verifica apenas os attr alterados)
 		$attributesValidateNull = ($action == 'insert') ? $this->attributes : $this->attributesSet;
-		$primaryKey = $this::primaryKey();
-		foreach ($attributesValidateNull as $k => $v) {				
+		foreach ($attributesValidateNull as $k => $v) {
 			if (!$this->attributesNull[$k] && empty($v) && !in_array($k, $primaryKey)) {
-				$erroStr = 'O campo "' . $attributeLabel[$k] . '" é obrigatório.';
+				$erroStr = $this->msgErrorValidate('NULL', $k);
 				$e[] = array($k => $erroStr);
 			}
 		}
-		
+		// validate - unique
+		$attributesValidateUnique = $this->attributesUnique;
+		foreach ($attributesValidateUnique as $k) {
+			if (array_key_exists($k, $this->attributesSet)) {
+				$v = $this->attributesSet[$k];
+				$whereId = array();
+				if ($action == 'update') {
+					foreach ($primaryKey as $pkName) {					
+						if (array_key_exists($pkName, $this->attributesSet)) {
+							$whereId[] = $pkName . "!=" . $this->attributesSet[$pkName];
+						}
+					}
+				}
+				$whereId = !empty($whereId) ? ' AND ' . implode(' AND ', $whereId) : '';					
+				$buscaUnique = $this->find($k . "='" . $v ."'" . $whereId);
+				if ($buscaUnique) {
+					$erroStr = $this->msgErrorValidate('UNIQUE', $k, $v);
+					$e[] = array($k => $erroStr);
+				}
+			}
+		}
 		// validate rules
         foreach ($this->rules() as $r) {
             $fn = $r[0];
             $attr = $r[1];
-
             // test - velidate exist
             if (!method_exists($validate, $fn)) {
                 continue;
             }
-			
 			// test - attr array
             if (!is_array($attr)) {
 				$attr = array($attr);
 			}
-			
 			// loop nos attr para validar
 			foreach ($attr as $a) {
 				$v = $validate->$fn($a, $r);
@@ -489,7 +534,6 @@ class Model {
 				}
 			}
         }
-		
 		// formata erros se existir
 		if (!empty($e)) {
 			foreach ($e as $v) {
@@ -500,13 +544,11 @@ class Model {
 				$errorHtml		.= "&bull;  " . $v[$attr] . "<br />";
 			}
 		}
-		
 		if (!empty($error)) {
             $return = array('error' => $error, 'attributes' => $errorAttr, 'errorHtml' => $errorHtml);
 		} else {			
 			$return = true;
 		}
-		
         return $return;
     }
 
@@ -518,39 +560,34 @@ class Model {
 	* @return bool/array error
 	*/
 	private function validateTypeSize() {
-		
 		$attributesSet = $this->attributesSet;
-		$attributeLabel = $this->attributeLabel();
 		$attributesType = $this->attributesType;
 		$attributesLength = $this->attributesLength;
 		$error = array();
 		$errorAttr = array();
 		$errorHtml = '';
-		
 		foreach ($attributesSet as $k => $v) {
 			$e = array();
 			$attributesTypeK = $attributesType[$k];
 			$attributesLengthK = $attributesLength[$k];
-			
 			// type and size
 			switch ($attributesTypeK) {
 				case 'NUMBER':
 				case 'INT':
 					if (!is_numeric($v)) {
-						$e[] = 'O campo "' . $attributeLabel[$k] . '" não é um numero.';
+						$e[] = $this->msgErrorValidate('NUMBER', $k);
 					}
 					if (strlen($v) > $attributesLengthK) {
-						$e[] = 'O campo "' . $attributeLabel[$k] . '" não pode ter mais que ' . $attributesLengthK . ' dígito(s).';
+						$e[] = $this->msgErrorValidate('LENGTH_DIG', $k, $attributesLengthK);
 					}
 					break; 
 				case 'VARCHAR2':
 				case 'VARCHAR':
 					if (strlen($v) > $attributesLengthK) {
-						$e[] = 'O campo "' . $attributeLabel[$k] . '" não pode ter mais que ' . $attributesLengthK . ' caractere(s).';
+						$e[] = $this->msgErrorValidate('LENGTH_STR', $k, $attributesLengthK);
 					}
 					break; 
 			}
-			
 			if (!empty($e)) {
 				foreach ($e as $kk => $vv) {
 					$error[] = array($k => $vv);
@@ -559,13 +596,11 @@ class Model {
 				}
 			}
 		}
-		
 		if(!empty($error)) {
             $return = array('error' => $error, 'attributes' => $errorAttr, 'errorHtml' => $errorHtml);
 		} else {
 			$return = true;
 		}
-		
 		return $return;
 	}
 	

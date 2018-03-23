@@ -121,8 +121,8 @@
 	
 	echo 'SAVE <br />';
 	$arrayAttr = array(
-		'TBL01_ID' => '6',
-		'TBL01_NOME' => 'New Empresa 6',
+		// 'TBL01_ID' => '6',
+		'TBL01_NOME' => 'Nome da empresa',
 		'TBL01_CNPJ' => '92312332138195',
 		'TBL01_SENHA' => 'SENHA_VALIDA_32_CARACTERES______',
 		'TBL01_ATIVO' => '1'
@@ -134,9 +134,9 @@
 	
 
 	
-	
-	echo 'FINDONE - INSTANCE';
-	if(($empresa_1 = $model->findOne(6))) {	
+	$id = 6;
+	echo 'FINDONE - INSTANCE: ID: ' . $id;
+	if(($empresa_1 = $model->findOne($id))) {	
 		var_dump($empresa_1);
 		
 		$arrayAttr['TBL01_SENHA'] = 'SENHA_GRANDE_40_CARACTERES______________';
