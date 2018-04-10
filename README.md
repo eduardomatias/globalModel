@@ -1,0 +1,2 @@
+# globalModel
+Modelo + Conexão MySql
